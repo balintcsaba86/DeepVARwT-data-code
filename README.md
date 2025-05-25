@@ -133,8 +133,6 @@ num of parameters
 508
 Time:  2031.6952918219613
 ```
-For a step-by-step overview see
-[docs/climate_prediction_flow.md](docs/climate_prediction_flow.md).
 #### US macroeconomics series 2
 The following code will make predictions from 20 training samples
 ```
