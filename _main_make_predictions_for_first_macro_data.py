@@ -156,7 +156,7 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
     num_of_t,hidden_dim=get_num_of_t_and_h(pretrained_model_name)
 
     train_len = train_test_data.shape[0]-horizon
-    m = data.shape[1]
+    m = train_test_data.shape[1]
     #x:shape(seq_len+horizon,batch,input_size)
     x=get_t_function_values_(train_len,num_of_t,horizon)
     #y: shape(T+h,m)
