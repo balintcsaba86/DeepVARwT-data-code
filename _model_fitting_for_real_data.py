@@ -9,6 +9,8 @@ import math
 from lstm_network import DeepVARwT
 from lstm_network import init_ar_param
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 def get_t_function_values_(seq_len,num_of_t):
     r"""
@@ -34,7 +36,7 @@ def get_t_function_values_(seq_len,num_of_t):
     for i in range(num_of_t):
         x[:,i]=t**(i+1)
 
-    x = torch.from_numpy(x.reshape((seq_len,1,num_of_t)))
+    x = torch.from_numpy(x.reshape((seq_len, 1, num_of_t))).to(DEVICE)
 
     return x
 
@@ -119,7 +121,7 @@ def print_AR_params(var_coeffs, residual_parameters,m,order):
 
 
 
-def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_trend,res_saving_path,threshould):
+def train_network(data, num_of_t, num_layers, hidden_dim, iter1, iter2, m, order, lr, lr_trend, res_saving_path, threshould, device=DEVICE):
     r"""
         Network training.
         Parameters
@@ -178,10 +180,10 @@ def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_
     m = data.shape[1]
     #get values of functions of t
     #x:shape(seq_len,batch,input_size)
-    x=get_t_function_values_(seq_len,num_of_t)
+    x = get_t_function_values_(seq_len, num_of_t).to(device)
     #y:shape(T,m)
     print('y-shape')
-    y= torch.from_numpy(data.values)
+    y = torch.from_numpy(data.values).to(device)
     print(y.shape)
 
     lstm_model = DeepVARwT(input_size=x.shape[2],
@@ -190,7 +192,7 @@ def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_
                           seqence_len=x.shape[1],
                            m=m,
                            order=order)
-    lstm_model = lstm_model.float()
+    lstm_model = lstm_model.float().to(device)
 
 
     # # Update the parameter.
@@ -233,7 +235,7 @@ def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_
         optimizer.step()
         print('iterations' + str(i+1) + ':trend error')
         print(trend_error)
-        loss_trend.append(trend_error.detach().numpy())
+        loss_trend.append(trend_error.detach().cpu().numpy())
     #save trend estimation loss
     loss_df= pd.DataFrame({'trend_loss':loss_trend})
     loss_df.to_csv(estimated_trend_file_path+'trend_loss.csv')
@@ -261,7 +263,7 @@ def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_
 
   #begin to enter Phase 2
          # trend forecast shape(T,m)
-    de_trend_data=(y-trend[:,0,:]).detach().numpy()
+    de_trend_data = (y - trend[:, 0, :]).detach().cpu().numpy()
     init_coeffs,L_elments=init_ar_param(de_trend_data,order,m)
     #init AR params using OLS
     state_dict = lstm_model.state_dict()
@@ -285,7 +287,7 @@ def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_
         optimizer.step()
         print('iterations'+str(i+1)+':log-likelihood')
         print(likelihood_loss)
-        log_likelihood.append(likelihood_loss.detach().numpy()[0,0])
+        log_likelihood.append(likelihood_loss.detach().cpu().numpy()[0, 0])
         if i>=2:
             current_loss=log_likelihood[i]
             past1_loss=log_likelihood[i-1]
@@ -306,7 +308,7 @@ def train_network(data,num_of_t,num_layers,hidden_dim,iter1,iter2,m,order,lr,lr_
     #saving estimated trend
     trend_list = []
     for n in range(m):
-        trend_flatten = torch.flatten(trend[:, :, n].t())
+        trend_flatten = torch.flatten(trend[:, :, n].t()).cpu()
         trend_list.append(trend_flatten.tolist())
     df_trend = pd.DataFrame(np.transpose(np.array(trend_list))) 
     df_trend.to_csv(estimated_trend_file_path+'estimated_trend.csv')  
