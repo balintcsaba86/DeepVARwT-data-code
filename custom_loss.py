@@ -8,6 +8,8 @@ import torch
 import pandas as pd
 import numpy as np
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 
 
@@ -37,12 +39,12 @@ def compute_error_for_trend_estimation(
     """
 
     len_of_seq = target.shape[0]
-    m=target.shape[1]
-    trend_value=trend[:,0,:]
+    m = target.shape[1]
+    trend_value = trend[:, 0, :]
     print('shape')
-    print(torch.square(trend_value-target).shape)
-    weights = torch.zeros(len_of_seq,m)
-    w= torch.arange(1, (len_of_seq+1)) / len_of_seq
+    print(torch.square(trend_value - target).shape)
+    weights = torch.zeros(len_of_seq, m, device=target.device)
+    w = torch.arange(1, (len_of_seq + 1), device=target.device) / len_of_seq
     for i in range(m):
         weights[:,i]=w
 
@@ -98,7 +100,7 @@ def compute_log_likelihood(
     print(target.shape)
 
     len_of_seq = target.shape[0]
-    log_likelihood_temp= 0
+    log_likelihood_temp = 0
     penalty_temp = 0
 
     # calculate var-cov of innovations of var(p)
@@ -114,12 +116,12 @@ def compute_log_likelihood(
     var_cov_matrix_for_initial_p_obs_update=transfrom_var_cov_matrix(var_cov_matrix_for_initial_p_obs, order, m)
 
     #get first p obs
-    first_p_obs=torch.zeros(order*m, 1)
+    first_p_obs = torch.zeros(order * m, 1, device=target.device)
     for i in range(order):
         trend_value = trend[i, 0, :]
-        b=i*m
-        e=i*m+m
-        first_p_obs[b:e,:]=target[i,:].reshape(m,1)-trend_value.reshape(m, 1)
+        b = i * m
+        e = i * m + m
+        first_p_obs[b:e, :] = target[i, :].reshape(m, 1) - trend_value.reshape(m, 1)
 
     log_likelihood_temp = log_likelihood_temp + torch.log(torch.det(var_cov_matrix_for_initial_p_obs_update)) + torch.mm(
         torch.mm(first_p_obs.t(), torch.inverse(var_cov_matrix_for_initial_p_obs_update)), first_p_obs)
@@ -132,7 +134,9 @@ def compute_log_likelihood(
         log_likelihood_temp=log_likelihood_temp+torch.log(torch.det(var_cov_innovations_varp))+torch.mm(
             torch.mm(error.t(), torch.inverse(var_cov_innovations_varp)), error)
 
-    return 0.5*(log_likelihood_temp+m*len_of_seq*torch.log(torch.tensor(2*math.pi)))
+    return 0.5 * (
+        log_likelihood_temp + m * len_of_seq * torch.log(torch.tensor(2 * math.pi, device=target.device))
+    )
 
 
 
@@ -218,7 +222,7 @@ def calculate_p0(m,order,A_coeffs_var1,var_cov_innovations_var1):
            shape: (m*p,m*p)
     """
 
-    i_matrix=torch.eye(m*m*order*order)
+    i_matrix = torch.eye(m * m * order * order, device=A_coeffs_var1.device)
     i_F_F=i_matrix-kron(A_coeffs_var1,A_coeffs_var1)
 
     Q_transposed = torch.transpose(var_cov_innovations_var1, 0, 1)
@@ -289,8 +293,8 @@ def A_coeffs_for_causal_VAR(A_coeffs_from_lstm,p,d,var_cov_innovations_varp):
            type: tensor
            shape: (d,d,p)
     """
-    Id = torch.eye(d)
-    all_p = torch.randn(d, d, p)
+    Id = torch.eye(d, device=A_coeffs_from_lstm.device)
+    all_p = torch.randn(d, d, p, device=A_coeffs_from_lstm.device)
     initial_A_coeffs = A_coeffs_from_lstm.reshape(d, d, p)
 
     for i1 in range(p):
@@ -301,8 +305,8 @@ def A_coeffs_for_causal_VAR(A_coeffs_from_lstm,p,d,var_cov_innovations_varp):
         all_p[:, :, i1] = torch.linalg.solve(B, A)
 
 
-    all_phi = torch.randn(d, d, p, p)  # [ , , i, j] for phi_{i, j}
-    all_phi_star = torch.randn(d, d, p, p)  # [ , , i, j] for phi_{i, j}*
+    all_phi = torch.randn(d, d, p, p, device=A_coeffs_from_lstm.device)  # [ , , i, j] for phi_{i, j}
+    all_phi_star = torch.randn(d, d, p, p, device=A_coeffs_from_lstm.device)  # [ , , i, j] for phi_{i, j}*
     # Set initial values
     Sigma = Id
     Sigma_star = Id
@@ -364,7 +368,7 @@ def make_var_cov_matrix_for_innovation_of_varp(lower_triang_params,m,order):
     """
     mp=m*order
     number_of_parms=m*(m+1)/2
-    lower_t_matrix=torch.eye(m,m)
+    lower_t_matrix = torch.eye(m, m, device=lower_triang_params.device)
     count_temp=0
     for i in range(m):
         for j in range(i+1):
@@ -408,7 +412,7 @@ def get_A_coeff_m_for_VAR_1(inital_A_m,m,order):
     F_temp1=torch.cat(F_list, dim=1)
 
     mp=m*order
-    added_tensor= torch.eye((mp-m), mp)
+    added_tensor = torch.eye((mp - m), mp, device=inital_A_m.device)
     coffs_m=torch.cat((F_temp1, added_tensor), 0)
     return coffs_m
 
@@ -440,7 +444,7 @@ def make_var_cov_of_innovations_var1(lower_triang_params_form_lstm,m,order):
     """
     mp=m*order
     number_of_parms=m*(m+1)/2
-    lower_t_matrix=torch.eye(m,m)
+    lower_t_matrix = torch.eye(m, m, device=lower_triang_params_form_lstm.device)
     count_temp=0
     for i in range(m):
         for j in range(i+1):
@@ -449,9 +453,9 @@ def make_var_cov_of_innovations_var1(lower_triang_params_form_lstm,m,order):
 
     var_cov_matrix = torch.mm(lower_t_matrix, lower_t_matrix.t())
 
-    zeros_cols = torch.zeros([m, (mp - m)])
+    zeros_cols = torch.zeros([m, (mp - m)], device=lower_triang_params_form_lstm.device)
     #2.generate (mp-m)*mp matrix
-    zeros_rows = torch.zeros([(mp - m),mp ])
+    zeros_rows = torch.zeros([(mp - m), mp], device=lower_triang_params_form_lstm.device)
     c = torch.cat((var_cov_matrix, zeros_cols), 1)
     var_cov_of_innovations_for_var1 = torch.cat((c, zeros_rows), 0)
     return (var_cov_of_innovations_for_var1)
@@ -566,7 +570,7 @@ def make_var_covar_matrix(residual_parameters,m,order):
     #generate void matrix
     mp=m*order
     number_of_parms=(m*(m+1))/2
-    covariance_matrix=torch.eye(m,m)
+    covariance_matrix = torch.eye(m, m, device=residual_parameters.device)
     count_temp=0
     #make lower triangel matrix
     for i in range(m):
@@ -574,9 +578,9 @@ def make_var_covar_matrix(residual_parameters,m,order):
             covariance_matrix[i,j]=residual_parameters[count_temp]
             count_temp=count_temp+1
     covariance_matrix_semi_positive = torch.mm(covariance_matrix, covariance_matrix.t())
-    zeros_cols = torch.zeros([m, (mp - m)])
+    zeros_cols = torch.zeros([m, (mp - m)], device=residual_parameters.device)
     #2.generate (mp-m)*mp matrix
-    zeros_rows = torch.zeros([(mp - m),mp ])
+    zeros_rows = torch.zeros([(mp - m), mp], device=residual_parameters.device)
     c = torch.cat((covariance_matrix_semi_positive, zeros_cols), 1)
     var_cov_m = torch.cat((c, zeros_rows), 0)
     return (var_cov_m)

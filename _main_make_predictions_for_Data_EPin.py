@@ -14,6 +14,8 @@ from lstm_network import *
 from _model_fitting_for_real_data import *
 import re
 
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 
 # def get_t_function_values_(seq_len,horizon):
@@ -80,7 +82,7 @@ def get_t_function_values_(seq_len,num_of_t,horizon):
     for i in range(num_of_t):
         x[:,i]=t**(i+1)
 
-    x = torch.from_numpy(x.reshape((seq_len+horizon,1,num_of_t)))
+    x = torch.from_numpy(x.reshape((seq_len + horizon, 1, num_of_t))).to(DEVICE)
 
     return x
 
@@ -88,7 +90,7 @@ def get_t_function_values_(seq_len,num_of_t,horizon):
 
 
 
-def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_name,res_saving_path,horizon,seasonality,name_list):
+def forecast_based_on_pretrained_model(train_test_data, order, pretrained_model_name, res_saving_path, horizon, seasonality, name_list, device=DEVICE):
     r"""
         Network training.
         Parameters
@@ -158,9 +160,9 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
     train_len = train_test_data.shape[0]-horizon
     m = data.shape[1]
     #x:shape(seq_len+horizon,batch,input_size)
-    x=get_t_function_values_(train_len,num_of_t,horizon)
+    x = get_t_function_values_(train_len, num_of_t, horizon).to(DEVICE)
     #y: shape(T+h,m)
-    y= torch.from_numpy(train_test_data.values)
+    y = torch.from_numpy(train_test_data.values).to(DEVICE)
     
 
     lstm_model = DeepVARwT(input_size=x.shape[2],
@@ -169,12 +171,12 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
                           seqence_len=x.shape[1],
                            m=m,
                          order=order)
-    lstm_model = lstm_model.float()
+    lstm_model = lstm_model.float().to(DEVICE)
 
-    lstm_model.load_state_dict(torch.load(res_saving_path+'pretrained_model/'+pretrained_model_name))
+    lstm_model.load_state_dict(torch.load(res_saving_path + 'pretrained_model/' + pretrained_model_name, map_location=DEVICE))
     train_test_len = x.shape[0]
     y_array = np.array(train_test_data)
-    var_coeffs, residual_parameters, trend= lstm_model(x.float())
+    var_coeffs, residual_parameters, trend = lstm_model(x.float())
 
     #saving estimated trend
     # trend_list = []
@@ -196,7 +198,7 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
     p_lagged_value = []
     for i in range(order):
         obs = y_array[(train_len - 1 - i), :].reshape(m, 1)
-        detrend_obs=torch.from_numpy(obs).float()-last_p_trend[(order-1-i),:].reshape(m,1)
+        detrend_obs = torch.from_numpy(obs).float().to(DEVICE) - last_p_trend[(order - 1 - i), :].reshape(m, 1)
         p_lagged_value.append(detrend_obs)
     p_lagged_observations = torch.cat(p_lagged_value, dim=0)
     mp = m * order
@@ -216,8 +218,8 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
     upper_forecast_list = []
     lower_forecast_list = []
 
-    identy_m=torch.eye(m)
-    zeros_cols = torch.zeros([m, (mp - m)])
+    identy_m = torch.eye(m, device=DEVICE)
+    zeros_cols = torch.zeros([m, (mp - m)], device=DEVICE)
     #J: shape(k,kp)
     J= torch.cat((identy_m, zeros_cols), 1)
 
@@ -232,8 +234,8 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
             #cal interval prediction
         square_root_list=cal_var_cov_of_prediction_error(A_coeffs_var1,residual_parameters,(t+1),order,m)
         #2 make interval prediction
-        upper_forecast=forecasts_part+torch.from_numpy(np.array(square_root_list).reshape(m,1)*1.96)
-        lower_forecast = forecasts_part -torch.from_numpy(np.array(square_root_list).reshape(m, 1) * 1.96)
+        upper_forecast = forecasts_part + torch.from_numpy(np.array(square_root_list).reshape(m, 1) * 1.96).to(DEVICE)
+        lower_forecast = forecasts_part - torch.from_numpy(np.array(square_root_list).reshape(m, 1) * 1.96).to(DEVICE)
         upper_forecast_list.append(upper_forecast)
         lower_forecast_list.append(lower_forecast)
 
@@ -251,11 +253,11 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
     final_upper_forecast = upper_forecast_ar + trend_forecast
     final_lower_forecast = lower_forecast_ar + trend_forecast
     print('ar forecast')
-    print((forecasts_ar.detach().numpy()))
+    print((forecasts_ar.detach().cpu().numpy()))
         #cal accuracy
-    point_forecast_array=final_forecast.detach().numpy()
-    final_upper_forecast_array = final_upper_forecast.detach().numpy()
-    final_lower_forecast_array = final_lower_forecast.detach().numpy()
+    point_forecast_array = final_forecast.detach().cpu().numpy()
+    final_upper_forecast_array = final_upper_forecast.detach().cpu().numpy()
+    final_lower_forecast_array = final_lower_forecast.detach().cpu().numpy()
         #acutal_observations:shape(horizon,m)
     acutal_observations=y_array[train_len:,:]
     print('actual foreecat')
@@ -287,20 +289,20 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
 
      #residual analysis
     trend_for_in_sample_data = torch.squeeze(trend[0:train_len, 0, :])
-    de_trend_series=torch.from_numpy(train_test_data.iloc[0:train_len,:].values).float()-trend_for_in_sample_data
-    pd.DataFrame(de_trend_series.detach().numpy()).to_csv(res_saving_path+'de_trend_series.csv')
+    de_trend_series = torch.from_numpy(train_test_data.iloc[0:train_len, :].values).float().to(DEVICE) - trend_for_in_sample_data
+    pd.DataFrame(de_trend_series.detach().cpu().numpy()).to_csv(res_saving_path + 'de_trend_series.csv')
     A_list = []
     for c in range(order):
         A_list.append(all_causal_coeffs[:, :, c])
     A_all = torch.cat(A_list, dim=1)
     #4.prepare lagged obs
-    residual_m=torch.zeros([m, (train_len-order)])
+    residual_m = torch.zeros([m, (train_len - order)], device=DEVICE)
     for t in range(order+1,train_len+1):
         print('t')
         print(t)
         p_lagged_data = []
         for i in range(order):
-            obs=de_trend_series[(t - 2 - i), :].reshape(m, 1)
+            obs = de_trend_series[(t - 2 - i), :].reshape(m, 1)
             p_lagged_data.append(obs)
         p_lagged_observations = torch.cat(p_lagged_data, dim=0)
         print('p_lagged_observations')
@@ -325,7 +327,7 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
     import scipy.stats as stats
     import pylab
     for ts in range(m): 
-        residual_ts = residual_m.detach().numpy()[ts,:]
+        residual_ts = residual_m.detach().cpu().numpy()[ts, :]
         print('standard_residual')
         print(residual_ts.shape)
         print(residual_ts)
@@ -348,7 +350,7 @@ def forecast_based_on_pretrained_model(train_test_data,order,pretrained_model_na
         plt.savefig(acf_qq_file_path + str(ts) + '_qq_plots.png')
         plt.close()
 
-    pd.DataFrame(residual_m.detach().numpy()).to_csv(acf_qq_file_path+'residual.csv')
+    pd.DataFrame(residual_m.detach().cpu().numpy()).to_csv(acf_qq_file_path + 'residual.csv')
 
     pytorch_total_params = sum(p.numel() for p in lstm_model.parameters() if p.requires_grad)
     # print('total number of parameters')
@@ -402,15 +404,15 @@ def cal_var_cov_of_prediction_error(A,residual_parameters,horizon,order,m):
     """
 
     mp=m*order
-    identy_m=torch.eye(m)
-    zeros_cols = torch.zeros([m, (mp - m)])
+    identy_m = torch.eye(m, device=DEVICE)
+    zeros_cols = torch.zeros([m, (mp - m)], device=DEVICE)
     #J: shape(k,kp)
     J= torch.cat((identy_m, zeros_cols), 1)
 
     # U_covariance:shape(mp*mp)
     U_covariance = make_var_covar_matrix(residual_parameters, m, order)
 
-    var_cov_temp=torch.zeros(mp,mp)
+    var_cov_temp = torch.zeros(mp, mp, device=DEVICE)
     for i in range(horizon):
         A_multip=multipy_A_matrix(A,i,mp)
         var_cov_temp=var_cov_temp+torch.mm(torch.mm(A_multip,U_covariance),A_multip.t())
@@ -424,10 +426,10 @@ def cal_var_cov_of_prediction_error(A,residual_parameters,horizon,order,m):
 
 
 #calculate FF^{i} power law of matrix
-def multipy_A_matrix(FF,i,mp):
-    A_multiply_tmp = torch.eye(mp, mp)
+def multipy_A_matrix(FF, i, mp):
+    A_multiply_tmp = torch.eye(mp, mp, device=DEVICE)
     if i==0:
-        return torch.eye(mp, mp)
+        return torch.eye(mp, mp, device=DEVICE)
     else:
         for num in range(i):
             A_multiply_tmp=torch.mm(A_multiply_tmp,FF)
@@ -449,7 +451,7 @@ from joblib import Parallel, delayed
 import numpy as np
 import pandas as pd
 
-def process_section(f, train_len, horizon, num_of_t_list, num_of_h_list, num_layers, iter1, iter2, m, order, lr, lr_trend, threshould, data, saving_path, seasonality,name_list):
+def process_section(f, train_len, horizon, num_of_t_list, num_of_h_list, num_layers, iter1, iter2, m, order, lr, lr_trend, threshould, data, saving_path, seasonality, name_list, device=DEVICE):
     b = f
     e = b + train_len
     training_data = data.iloc[b:e, :]
@@ -462,14 +464,14 @@ def process_section(f, train_len, horizon, num_of_t_list, num_of_h_list, num_lay
     for i, t_num in enumerate(num_of_t_list):
         for j, h_num in enumerate(num_of_h_list):
             set_global_seed(4000)
-            likelihood, lstm_model, model_name = train_network(training_data, t_num, num_layers, h_num, iter1, iter2, m, order, lr, lr_trend, res_saving_path, threshould)
+            likelihood, lstm_model, model_name = train_network(training_data, t_num, num_layers, h_num, iter1, iter2, m, order, lr, lr_trend, res_saving_path, threshould, device=device)
             likelihood_list.append(likelihood)
             model_name_list.append(model_name)
 
     min_index = likelihood_list.index(min(likelihood_list))
     optimal_model_name = model_name_list[min_index]
 
-    ape, sis, forecast, fore_low, fore_upp,pytorch_total_params = forecast_based_on_pretrained_model(train_test_data, order, optimal_model_name, res_saving_path, horizon, seasonality,name_list)
+    ape, sis, forecast, fore_low, fore_upp, pytorch_total_params = forecast_based_on_pretrained_model(train_test_data, order, optimal_model_name, res_saving_path, horizon, seasonality, name_list, device=device)
 
     # save forecasts
     pd.DataFrame(forecast).to_csv(res_saving_path + 'point_forecasts.csv')
@@ -522,7 +524,26 @@ num_of_h_list=[3,5,8]
 
 
 # Run the process in parallel
-results = Parallel(n_jobs=-1)(delayed(process_section)(f, train_len, horizon, num_of_t_list, num_of_h_list, num_layers, iter1, iter2, m, order, lr, lr_trend, threshould, data, saving_path, seasonality,name_list) for f in range(forecast_times))
+results = Parallel(n_jobs=-1)(delayed(process_section)(
+    f,
+    train_len,
+    horizon,
+    num_of_t_list,
+    num_of_h_list,
+    num_layers,
+    iter1,
+    iter2,
+    m,
+    order,
+    lr,
+    lr_trend,
+    threshould,
+    data,
+    saving_path,
+    seasonality,
+    name_list,
+    device=DEVICE,
+) for f in range(forecast_times))
 
 # Extract results
 param_num=[]
